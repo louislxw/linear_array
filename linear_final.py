@@ -1,4 +1,4 @@
-import queue
+from queue import deque
 from queue import Queue
 from scipy.fftpack import fft, fftshift
 
@@ -14,7 +14,7 @@ class LinearArrayCell:
         self.data_to_compute_2 = Queue(maxsize=self.cell_size)
         self.cell_shift = Queue()
         self.cell_partial_result = Queue()
-        self.cell_output = queue.Queue()
+        self.cell_output = Queue()
         self.signal_index = 0
 
     def connect(self, cell_index, array, array_size, iterations):
@@ -54,7 +54,7 @@ class LinearArrayCell:
             # self.cell_output.put(self.cell_partial_result)
         fft_results = fft(list_3)
         fft_shift_results = fftshift(fft_results)
-        self.cell_output.queue = queue.deque(fft_shift_results)
+        self.cell_output.queue = deque(fft_shift_results)
 
         for _ in range(self.cell_size):
             self.single_out = self.data_to_compute_1.get()
@@ -111,11 +111,11 @@ for signal in range(signals):
     for pe in range(pes):
         if signal == 0:
             for index in range(pe * registers, (pe + 1) * registers):
-                complex_data = index + (index-1) * 1j
+                complex_data = index/128 + (index+1)/128 * 1j
                 input_queue[signal][pe].put(complex_data)
         if signal > 0:
             for index in reversed(range(pe * registers, (pe + 1) * registers)):
-                complex_data = index + (index-1) * 1j
+                complex_data = index/128 + (index+1)/128 * 1j
                 input_queue[signal][pe].put(complex_data)
 
 # print(list(input_queue[0][-1].queue))
@@ -125,5 +125,8 @@ res = myArray.run(signals*pes)  # run (signal*pes) times
 
 for i in range(signals):
     for j in range(pes):
-        print(list(res[i][j].queue))
+        # print('PE%d:' %j, list(res[i][j].queue))
+        print('PE{:d} output: {}'.format(j, ['%.5f, %.5f' % (element.real, element.imag) for element in list(res[i][j].queue)]))
+        print(len(list(res[i][j].queue)))
+
 
