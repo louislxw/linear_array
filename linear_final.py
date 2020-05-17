@@ -15,12 +15,11 @@ def DFT(x):
 
 
 def FFT(x):
-    """A recursive implementation of the 1D Cooley-Turkey FFT"""
+    """A recursive implementation of the 1D Cooley-Tukey FFT"""
     N = len(x)
-
     if N % 2 > 0:
         raise ValueError("size of x must be a power of 2")
-    elif N <= 32:  # this cutoff should be optimized
+    elif N <= 2:  # this cutoff should be optimized
         return DFT(x)
     else:
         X_even = FFT(x[::2])
@@ -28,6 +27,35 @@ def FFT(x):
         factor = np.exp(-2j * np.pi * np.arange(N) / N)
         return np.concatenate([X_even + factor[:N // 2] * X_odd,
                                X_even + factor[N // 2:] * X_odd])
+
+
+def FFT_vectorized(x):
+    """A vectorized, non-recursive version of the Cooley-Tukey FFT"""
+    N = len(x)
+
+    if np.log2(N) % 1 > 0:
+        raise ValueError("size of x must be a power of 2")
+
+    # N_min here is equivalent to the stopping condition above,
+    # and should be a power of 2
+    N_min = min(N, 2)
+
+    # Perform an O[N^2] DFT on all length-N_min sub-problems at once
+    n = np.arange(N_min)
+    k = n[:, None]
+    M = np.exp(-2j * np.pi * n * k / N_min)
+    X = np.dot(M, np.array(x).reshape((N_min, -1)))
+
+    # build-up each level of the recursive calculation all at once
+    while X.shape[0] < N:
+        X_even = X[:, :X.shape[1] // 2]
+        X_odd = X[:, X.shape[1] // 2:]
+        factor = np.exp(-1j * np.pi * np.arange(X.shape[0])
+                        / X.shape[0])[:, None]
+        X = np.vstack([X_even + factor * X_odd,
+                       X_even - factor * X_odd])
+
+    return X.ravel()
 
 
 class LinearArrayCell:
@@ -79,11 +107,13 @@ class LinearArrayCell:
             self.cell_partial_result = real_part + image_part * 1j  # result of conjugate multiplication
             list_3.append(self.cell_partial_result)
             # self.cell_output.put(self.cell_partial_result)
-        # dft_result = DFT(list_3)
-        fft_result = FFT(list_3)
-        # fftpack_result = fft(list_3)
+        # fft_result = DFT(list_3)
+        # fft_result = FFT(list_3)
+        fft_result = FFT_vectorized(list_3)
+        # fft_result = fft(list_3)
         # print(f'Compare DFT with built-in FFT at PE {iterations}:', np.allclose(DFT(list_3), fft(list_3)))
         # print(f'Compare FFT with built-in FFT at PE {iterations}:', np.allclose(FFT(list_3), fft(list_3)))
+        # print(f'Compare FFT with built-in FFT at PE {iterations}:', np.allclose(FFT_vectorized(list_3), fft(list_3)))
         fft_shift_results = fftshift(fft_result)
         self.cell_output.queue = deque(fft_shift_results)
 
@@ -134,14 +164,14 @@ class LinearArray:
 
 
 signals = 1
-pes = 4
+pes = 256
 registers = 32
 input_queue = [[Queue() for _ in range(pes)] for _ in range(signals)]
 read_cycle = registers * pes
 compute_cycle = registers + registers * np.log2(registers)
 shift_cycle = registers
 total_cycle = read_cycle + compute_cycle + (shift_cycle + compute_cycle) * (pes - 1)
-print(f'No. of cycles = {total_cycle}, Execution time = {total_cycle*2/1000} us.')
+print(f'No. of cycles = {int(total_cycle)}, Execution time = {total_cycle*2/1000} us.')
 
 for signal in range(signals):
     for pe in range(pes):
