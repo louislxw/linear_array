@@ -83,7 +83,7 @@ class LinearArrayCell:
             self.cell_input = array.cells[self.cell_index - 1]  # shifting registers
 
     def cell_read(self):  # load all data needed for a cell
-        if type(self.cell_input) is Queue:
+        if type(self.cell_input) is Queue:  # from input FIFO
             for _ in range(self.cell_size):
                 if self.cell_input.empty():
                     self.single_in = 0
@@ -91,7 +91,7 @@ class LinearArrayCell:
                     self.single_in = self.cell_input.get()
                 self.data_to_compute_1.put(self.single_in)
                 self.data_to_compute_2.put(self.single_in.real - self.single_in.imag * 1j)  # conjugate
-        else:
+        else:  # from shift registers (only for data, not for conjugate(data))
             for _ in range(self.cell_size):
                 self.single_in = self.cell_input.cell_shift.get()
                 self.data_to_compute_1.put(self.single_in)
@@ -101,25 +101,38 @@ class LinearArrayCell:
         list_1 = list(self.data_to_compute_1.queue)
         list_2 = list(self.data_to_compute_2.queue)
         list_3 = []
+
         for i in range(len(list_1)):
             real_part = list_1[i].real * list_2[i].real - list_1[i].imag * list_2[i].imag
             image_part = list_1[i].imag * list_2[i].real + list_1[i].real * list_2[i].imag
-            self.cell_partial_result = real_part + image_part * 1j  # result of conjugate multiplication
-            list_3.append(self.cell_partial_result)
+            conjugate_mult = real_part + image_part * 1j
+            list_3.append(conjugate_mult)
+            # self.cell_partial_result = real_part + image_part * 1j  # result of conjugate multiplication
+            # list_3.append(self.cell_partial_result)
             # self.cell_output.put(self.cell_partial_result)
+
         # fft_result = DFT(list_3)
-        # fft_result = FFT(list_3)
-        fft_result = FFT_vectorized(list_3)
+        fft_result = FFT(list_3)
+        # fft_result = FFT_vectorized(list_3)
         # fft_result = fft(list_3)
         # print(f'Compare DFT with built-in FFT at PE {iterations}:', np.allclose(DFT(list_3), fft(list_3)))
         # print(f'Compare FFT with built-in FFT at PE {iterations}:', np.allclose(FFT(list_3), fft(list_3)))
         # print(f'Compare FFT with built-in FFT at PE {iterations}:', np.allclose(FFT_vectorized(list_3), fft(list_3)))
-        fft_shift_results = fftshift(fft_result)
+        fft_shift_results = fftshift(fft_result)[registers // 2 - 8: registers // 2 + 8]  # take middle 16-bit
         self.cell_output.queue = deque(fft_shift_results)
-
+        '''
+        for j in range(len(fft_shift_results)):
+            alpha_partial = np.absolute(fft_shift_results[j])
+            alpha_final = np.absolute(self.cell_partial_result)
+            if alpha_partial > alpha_final:
+                self.cell_partial_result = alpha_partial
+        '''
         for _ in range(self.cell_size):
             self.single_out = self.data_to_compute_1.get()
             self.cell_shift.put(self.single_out)
+
+        # if iterations == total_iter:
+            # self.cell_output.queue = deque(self.cell_partial_result)
 
     def clear_shift(self):  # to clear shift data from cell_shift queue when complete an input signal
         for _ in range(self.cell_size):
@@ -151,7 +164,7 @@ class LinearArray:
     def compute(self):
         for cell in self.cells:
             cell.compute(self.iterations)
-            for _ in range(cell.cell_size):
+            for _ in range(cell.cell_size // 2):
                 self.result[cell.signal_index - 1][cell.cell_index].put(cell.cell_output.get())
 
     def run(self, total_iterations):
@@ -166,12 +179,13 @@ class LinearArray:
 signals = 1
 pes = 256
 registers = 32
+total_iter = signals * pes
 input_queue = [[Queue() for _ in range(pes)] for _ in range(signals)]
 read_cycle = registers * pes
 compute_cycle = registers + registers * np.log2(registers)
 shift_cycle = registers
 total_cycle = read_cycle + compute_cycle + (shift_cycle + compute_cycle) * (pes - 1)
-print(f'No. of cycles = {int(total_cycle)}, Execution time = {total_cycle*2/1000} us.')
+print(f'No. of cycles = {int(total_cycle)}, Execution time = {total_cycle * 2 / 1000} us at 500MHz.')
 
 for signal in range(signals):
     for pe in range(pes):
@@ -188,7 +202,7 @@ for signal in range(signals):
 
 myArray = LinearArray(pes, registers, input_queue)
 start_time = time.time()
-res = myArray.run(signals * pes)  # run (signal*pes) times
+res = myArray.run(total_iter)  # run (signal*pes) times
 end_time = time.time()
 print(f'---{end_time - start_time} seconds ---')
 
@@ -200,3 +214,4 @@ for i in range(signals):
         # element.imag) for element in list(res[i][j].queue)]))
         print(len(list(res[i][j].queue)))
 '''
+
