@@ -3,7 +3,6 @@ import numpy as np
 from queue import deque
 from queue import Queue
 from scipy.fftpack import fft, fftshift
-from numpy import sin, cos, pi, ones, zeros, arange, r_, sqrt, mean
 
 
 def DFT(x):
@@ -25,7 +24,7 @@ def FFT(x):
     else:
         X_even = FFT(x[::2])
         X_odd = FFT(x[1::2])
-        factor = np.exp(-2j * np.pi * np.arange(N) / N)
+        factor = np.exp(-2.0j * np.pi * np.arange(N) / N)
         return np.concatenate([X_even + factor[:N // 2] * X_odd,
                                X_even + factor[N // 2:] * X_odd])
 
@@ -47,8 +46,8 @@ def rFFT(x):
 
     w = getTwiddle(n)
     m = n // 2
-    X = ones(m, float) * 1j
-    Y = ones(m, float) * 1j
+    X = np.ones(m, float) * 1j
+    Y = np.ones(m, float) * 1j
 
     for k in range(m):
         X[k] = x[2 * k]
@@ -57,23 +56,25 @@ def rFFT(x):
     X = rFFT(X)
     Y = rFFT(Y)
     cycle = 0
+    F = np.ones(n, float) * 1j
 
-    F = ones(n, float) * 1j
     for k in range(n):
         i = (k % m)
         F[k] = X[i] + w[k] * Y[i]
         cycle = cycle + 1
-    print(cycle)
+
+    # print(cycle)
+
     return F
 
 
 def getTwiddle(NFFT):
     """Generate the twiddle factors"""
 
-    W = r_[[1.0 + 1.0j] * NFFT]
+    W = np.r_[[1.0 + 1.0j] * NFFT]
 
     for k in range(NFFT):
-        W[k] = cos(2.0*pi*k/NFFT) - 1.0j * sin(2.0*pi*k/NFFT)
+        W[k] = np.exp(-2.0j * np.pi * k / NFFT)
 
     return W
 
