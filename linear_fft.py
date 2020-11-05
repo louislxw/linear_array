@@ -3,6 +3,7 @@ import numpy as np
 from queue import deque
 from queue import Queue
 from scipy.fftpack import fft, fftshift
+from numpy import sin, cos, pi, ones, zeros, arange, r_, sqrt, mean
 
 
 def DFT(x):
@@ -27,6 +28,54 @@ def FFT(x):
         factor = np.exp(-2j * np.pi * np.arange(N) / N)
         return np.concatenate([X_even + factor[:N // 2] * X_odd,
                                X_even + factor[N // 2:] * X_odd])
+
+
+def rFFT(x):
+    """
+    Recursive FFT implementation.
+
+    References
+      -- http://www.cse.uiuc.edu/iem/fft/rcrsvfft/
+      -- "A Simple and Efficient FFT Implementation in C++"
+          by Vlodymyr Myrnyy
+    """
+
+    n = len(x)
+
+    if n == 1:
+        return x
+
+    w = getTwiddle(n)
+    m = n // 2
+    X = ones(m, float) * 1j
+    Y = ones(m, float) * 1j
+
+    for k in range(m):
+        X[k] = x[2 * k]
+        Y[k] = x[2 * k + 1]
+
+    X = rFFT(X)
+    Y = rFFT(Y)
+    cycle = 0
+
+    F = ones(n, float) * 1j
+    for k in range(n):
+        i = (k % m)
+        F[k] = X[i] + w[k] * Y[i]
+        cycle = cycle + 1
+    print(cycle)
+    return F
+
+
+def getTwiddle(NFFT):
+    """Generate the twiddle factors"""
+
+    W = r_[[1.0 + 1.0j] * NFFT]
+
+    for k in range(NFFT):
+        W[k] = cos(2.0*pi*k/NFFT) - 1.0j * sin(2.0*pi*k/NFFT)
+
+    return W
 
 
 def FFT_vectorized(x):
@@ -112,11 +161,13 @@ class LinearArrayCell:
             # self.cell_output.put(self.cell_partial_result)
 
         # fft_result = DFT(list_3)
-        fft_result = FFT(list_3)
+        # fft_result = FFT(list_3)
+        fft_result = rFFT(list_3)
         # fft_result = FFT_vectorized(list_3)
         # fft_result = fft(list_3)
         # print(f'Compare DFT with built-in FFT at PE {iterations}:', np.allclose(DFT(list_3), fft(list_3)))
         # print(f'Compare FFT with built-in FFT at PE {iterations}:', np.allclose(FFT(list_3), fft(list_3)))
+        print(f'Compare rFFT with built-in FFT at PE {iterations}:', np.allclose(rFFT(list_3), fft(list_3)))
         # print(f'Compare FFT with built-in FFT at PE {iterations}:', np.allclose(FFT_vectorized(list_3), fft(list_3)))
         fft_shift_results = fftshift(fft_result)[registers // 2 - 8: registers // 2 + 8]  # take middle 16-bit
         self.cell_output.queue = deque(fft_shift_results)
