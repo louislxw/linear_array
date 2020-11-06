@@ -4,6 +4,9 @@ from queue import deque
 from queue import Queue
 from scipy.fftpack import fft, fftshift
 
+global cycle
+cycle = 0
+
 
 def DFT(x):
     """Compute the Discrete Fourier Transform of the 1D array x"""
@@ -32,7 +35,6 @@ def FFT(x):
 def rFFT(x):
     """
     Recursive FFT implementation.
-
     References
       -- http://www.cse.uiuc.edu/iem/fft/rcrsvfft/
       -- "A Simple and Efficient FFT Implementation in C++"
@@ -40,7 +42,6 @@ def rFFT(x):
     """
 
     n = len(x)
-
     if n == 1:
         return x
 
@@ -55,15 +56,13 @@ def rFFT(x):
 
     X = rFFT(X)
     Y = rFFT(Y)
-    cycle = 0
     F = np.ones(n, float) * 1j
 
     for k in range(n):
         i = (k % m)
         F[k] = X[i] + w[k] * Y[i]
-        cycle = cycle + 1
-
-    # print(cycle)
+        global cycle
+        cycle += 1
 
     return F
 
@@ -168,11 +167,12 @@ class LinearArrayCell:
         # fft_result = fft(list_3)
         # print(f'Compare DFT with built-in FFT at PE {iterations}:', np.allclose(DFT(list_3), fft(list_3)))
         # print(f'Compare FFT with built-in FFT at PE {iterations}:', np.allclose(FFT(list_3), fft(list_3)))
-        print(f'Compare rFFT with built-in FFT at PE {iterations}:', np.allclose(rFFT(list_3), fft(list_3)))
+        # print(f'Compare rFFT with built-in FFT at PE {iterations}:', np.allclose(rFFT(list_3), fft(list_3)))
         # print(f'Compare FFT with built-in FFT at PE {iterations}:', np.allclose(FFT_vectorized(list_3), fft(list_3)))
         fft_shift_results = fftshift(fft_result)[registers // 2 - 8: registers // 2 + 8]  # take middle 16-bit
         self.cell_output.queue = deque(fft_shift_results)
         '''
+        ### To be continued (Alpha profile) ### 
         for j in range(len(fft_shift_results)):
             alpha_partial = np.absolute(fft_shift_results[j])
             alpha_final = np.absolute(self.cell_partial_result)
@@ -184,7 +184,7 @@ class LinearArrayCell:
             self.cell_shift.put(self.single_out)
 
         # if iterations == total_iter:
-            # self.cell_output.queue = deque(self.cell_partial_result)
+        # self.cell_output.queue = deque(self.cell_partial_result)
 
     def clear_shift(self):  # to clear shift data from cell_shift queue when complete an input signal
         for _ in range(self.cell_size):
@@ -229,15 +229,17 @@ class LinearArray:
 
 
 signals = 1
-pes = 256
+pes = 1  # 256
 registers = 32
 total_iter = signals * pes
 input_queue = [[Queue() for _ in range(pes)] for _ in range(signals)]
 read_cycle = registers * pes
 compute_cycle = registers + registers * np.log2(registers)
 shift_cycle = registers
-total_cycle = read_cycle + compute_cycle + (shift_cycle + compute_cycle) * (pes - 1)
-print(f'No. of cycles = {int(total_cycle)}, Execution time = {total_cycle * 2 / 1000} us at 500MHz.')
+total_cycle = int(read_cycle + compute_cycle + (shift_cycle + compute_cycle) * (pes - 1))
+total_time = total_cycle * 2 / 1000
+print('Theoretically, total number of cycles = {:d}, Time on FPGA = {:f} us at 500MHz.'.format(total_cycle, total_time))
+# print(f'No. of cycles = {int(total_cycle)}, Execution time = {total_cycle * 2 / 1000} us at 500MHz.')
 
 for signal in range(signals):
     for pe in range(pes):
@@ -256,7 +258,9 @@ myArray = LinearArray(pes, registers, input_queue)
 start_time = time.time()
 res = myArray.run(total_iter)  # run (signal*pes) times
 end_time = time.time()
-print(f'---{end_time - start_time} seconds ---')
+cpu_time = end_time - start_time
+print('---{:6.2f} seconds on CPU---'.format(cpu_time))
+print('Total number of cycles = {}'.format(cycle))
 
 '''
 for i in range(signals):
