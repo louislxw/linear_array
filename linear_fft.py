@@ -32,6 +32,19 @@ def FFT(x):
                                X_even + factor[N // 2:] * X_odd])
 
 
+def complex_mult(x, y):
+    global cycle
+    list_3 = []
+    for i in range(len(x)):
+        real_part = x[i].real * y[i].real - x[i].imag * y[i].imag
+        image_part = x[i].imag * y[i].real + x[i].real * y[i].imag
+        complex_result = real_part + image_part * 1j
+        list_3.append(complex_result)
+        cycle += 1
+
+    return list_3
+
+
 def rFFT(x):
     """
     Recursive FFT implementation.
@@ -71,7 +84,6 @@ def getTwiddle(NFFT):
     """Generate the twiddle factors"""
 
     W = np.r_[[1.0 + 1.0j] * NFFT]
-
     for k in range(NFFT):
         W[k] = np.exp(-2.0j * np.pi * k / NFFT)
 
@@ -132,6 +144,7 @@ class LinearArrayCell:
             self.cell_input = array.cells[self.cell_index - 1]  # shifting registers
 
     def cell_read(self):  # load all data needed for a cell
+        global cycle
         if type(self.cell_input) is Queue:  # from input FIFO
             for _ in range(self.cell_size):
                 if self.cell_input.empty():
@@ -140,26 +153,28 @@ class LinearArrayCell:
                     self.single_in = self.cell_input.get()
                 self.data_to_compute_1.put(self.single_in)
                 self.data_to_compute_2.put(self.single_in.real - self.single_in.imag * 1j)  # conjugate
+                cycle += 1
         else:  # from shift registers (only for data, not for conjugate(data))
             for _ in range(self.cell_size):
                 self.single_in = self.cell_input.cell_shift.get()
                 self.data_to_compute_1.put(self.single_in)
+                cycle += 1
                 # self.data_to_compute_2.put(self.single_in.real - self.single_in.imag * 1j)
 
     def compute(self, iterations):
         list_1 = list(self.data_to_compute_1.queue)
         list_2 = list(self.data_to_compute_2.queue)
         list_3 = []
-
+        list_3 = complex_mult(list_1, list_2)
+        '''
         for i in range(len(list_1)):
             real_part = list_1[i].real * list_2[i].real - list_1[i].imag * list_2[i].imag
             image_part = list_1[i].imag * list_2[i].real + list_1[i].real * list_2[i].imag
-            conjugate_mult = real_part + image_part * 1j
-            list_3.append(conjugate_mult)
-            # self.cell_partial_result = real_part + image_part * 1j  # result of conjugate multiplication
-            # list_3.append(self.cell_partial_result)
-            # self.cell_output.put(self.cell_partial_result)
-
+            complex_result = real_part + image_part * 1j
+            list_3.append(complex_result)
+            global cycle
+            cycle += 1
+        '''
         # fft_result = DFT(list_3)
         # fft_result = FFT(list_3)
         fft_result = rFFT(list_3)
@@ -259,8 +274,9 @@ start_time = time.time()
 res = myArray.run(total_iter)  # run (signal*pes) times
 end_time = time.time()
 cpu_time = end_time - start_time
+pe_cycle = cycle // pes
 print('---{:6.2f} seconds on CPU---'.format(cpu_time))
-print('Total number of cycles = {}'.format(cycle))
+print('Real total number of cycles on PE = {}'.format(pe_cycle))
 
 '''
 for i in range(signals):
