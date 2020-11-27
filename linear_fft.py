@@ -164,17 +164,8 @@ class LinearArrayCell:
     def compute(self, iterations):
         list_1 = list(self.data_to_compute_1.queue)
         list_2 = list(self.data_to_compute_2.queue)
-        list_3 = []
         list_3 = complex_mult(list_1, list_2)
-        '''
-        for i in range(len(list_1)):
-            real_part = list_1[i].real * list_2[i].real - list_1[i].imag * list_2[i].imag
-            image_part = list_1[i].imag * list_2[i].real + list_1[i].real * list_2[i].imag
-            complex_result = real_part + image_part * 1j
-            list_3.append(complex_result)
-            global cycle
-            cycle += 1
-        '''
+
         # fft_result = DFT(list_3)
         # fft_result = FFT(list_3)
         fft_result = rFFT(list_3)
