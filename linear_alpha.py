@@ -174,7 +174,7 @@ class LinearArrayCell:
         # print(f'Compare FFT with built-in FFT at PE {iterations}:', np.allclose(FFT(list_3), fft(list_3)))
         # print(f'Compare rFFT with built-in FFT at PE {iterations}:', np.allclose(rFFT(list_3), fft(list_3)))
         # print(f'Compare FFT with built-in FFT at PE {iterations}:', np.allclose(FFT_vectorized(list_3), fft(list_3)))
-        fft_shift_results = fftshift(fft_result)[registers // 2 - 8: registers // 2 + 8]  # take middle 16-bit
+        fft_shift_results = fftshift(fft_result)[self.cell_size // 2 - 8: self.cell_size // 2 + 8]  # take middle 16-bit
         self.cell_output.queue = deque(fft_shift_results)
         for _ in range(self.cell_size):
             self.single_out = self.data_to_compute_1.get()
@@ -185,7 +185,7 @@ class LinearArrayCell:
         list_2 = list(self.data_to_compute_2.queue)
         list_3 = complex_mult(list_1, list_2)
         fft_result = rFFT(list_3)
-        fft_shift_results = fftshift(fft_result)[registers // 2 - 8: registers // 2 + 8]  # take middle 16-bit
+        fft_shift_results = fftshift(fft_result)[self.cell_size // 2 - 8: self.cell_size // 2 + 8]  # take middle 16-bit
         self.cell_output.queue = deque(fft_shift_results)
         '''
         ### To be continued (Alpha profile) ### 
@@ -255,46 +255,54 @@ class LinearArray:
         return self.result
 
 
-signals = 1
-pes = 1  # 256
-registers = 32
-total_iter = signals * pes
-input_queue = [[Queue() for _ in range(pes)] for _ in range(signals)]
-read_cycle = registers * pes
-compute_cycle = registers + registers * np.log2(registers)
-shift_cycle = registers
-total_cycle = int(read_cycle + compute_cycle + (shift_cycle + compute_cycle) * (pes - 1))
-total_time = total_cycle * 2 / 1000
-print('Theoretically, total number of cycles = {:d}, Time on FPGA = {:f} us at 500MHz.'.format(total_cycle, total_time))
+def main():
+    signals = 1
+    pes = 1  # 256
+    registers = 32
+    total_iter = signals * pes
+    input_queue = [[Queue() for _ in range(pes)] for _ in range(signals)]
+    read_cycle = registers * pes
+    compute_cycle = registers + registers * np.log2(registers)
+    shift_cycle = registers
+    total_cycle = int(read_cycle + compute_cycle + (shift_cycle + compute_cycle) * (pes - 1))
+    total_time = total_cycle * 2 / 1000
+    print('Theoretically, total number of cycles = {:d}, Time on FPGA = {:f} us at 500MHz.'.format(total_cycle,
+                                                                                                   total_time))
 
-for signal in range(signals):
-    for pe in range(pes):
-        if signal == 0:
-            for index in range(pe * registers, (pe + 1) * registers):
-                complex_data = index / 128 + (index + 1) / 128 * 1j
-                input_queue[signal][pe].put(complex_data)
-        if signal > 0:
-            for index in reversed(range(pe * registers, (pe + 1) * registers)):
-                complex_data = index / 128 + (index + 1) / 128 * 1j
-                input_queue[signal][pe].put(complex_data)
+    for signal in range(signals):
+        for pe in range(pes):
+            if signal == 0:
+                for index in range(pe * registers, (pe + 1) * registers):
+                    complex_data = index / 128 + (index + 1) / 128 * 1j
+                    input_queue[signal][pe].put(complex_data)
+            if signal > 0:
+                for index in reversed(range(pe * registers, (pe + 1) * registers)):
+                    complex_data = index / 128 + (index + 1) / 128 * 1j
+                    input_queue[signal][pe].put(complex_data)
 
-# print(list(input_queue[0][-1].queue))
+    # print(list(input_queue[0][-1].queue))
 
-myArray = LinearArray(pes, registers, input_queue)
-start_time = time.time()
-scd_fft = myArray.run(total_iter)  # run (signal*pes) times
-scd_alpha = myArray.run_alpha(total_iter)  # run (signal*pes) times
-end_time = time.time()
-cpu_time = end_time - start_time
-pe_cycle = cycle // pes
-print('---{:6.2f} seconds on CPU---'.format(cpu_time))
-print('Real total number of cycles on PE = {}'.format(pe_cycle))
+    myArray = LinearArray(pes, registers, input_queue)
+    start_time = time.time()
+    scd_fft = myArray.run(total_iter)  # run (signal*pes) times
+    scd_alpha = myArray.run_alpha(total_iter)  # run (signal*pes) times
+    end_time = time.time()
+    cpu_time = end_time - start_time
+    pe_cycle = cycle // pes
+    print('---{:6.2f} seconds on CPU---'.format(cpu_time))
+    print('Real total number of cycles on PE = {}'.format(pe_cycle))
 
-'''
-for i in range(signals):
-    for j in range(pes):
-        # print('PE%d:' %j, list(scd_alpha[i][j].queue))
-        # print('PE{:d} output: {}'.format(j, ['%.5f, %.5f' % (element.real,
-        # element.imag) for element in list(scd_alpha[i][j].queue)]))
-        print(len(list(scd_alpha[i][j].queue)))
-'''
+    '''
+    for i in range(signals):
+        for j in range(pes):
+            # print('PE%d:' %j, list(scd_alpha[i][j].queue))
+            # print('PE{:d} output: {}'.format(j, ['%.5f, %.5f' % (element.real,
+            # element.imag) for element in list(scd_alpha[i][j].queue)]))
+            print(len(list(scd_alpha[i][j].queue)))
+    '''
+
+
+if __name__ == "__main__":
+    main()
+
+
