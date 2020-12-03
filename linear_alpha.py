@@ -166,8 +166,6 @@ class LinearArrayCell:
         list_1 = list(self.data_to_compute_1.queue)
         list_2 = list(self.data_to_compute_2.queue)
         cm = complex_mult(list_1, list_2)
-        # fft_result = DFT(cm_1)
-        # print(f'Compare DFT with built-in FFT at PE {iterations}:', np.allclose(DFT(cm_0), fft(cm_0)))
         fft_res = rFFT(cm)
         # print(f'Compare rFFT with built-in FFT at PE {iterations}:', np.allclose(rFFT(cm_0), fft(cm_0)))
         fft_shift = fftshift(fft_res)[len(fft_res) // 2 - 8: len(fft_res) // 2 + 8]  # fft_res[8:23]
@@ -283,17 +281,20 @@ def main():
     myArray = LinearArray(pes, registers, input_queue)
     start_time = time.time()
     scd = myArray.run(total_iter)  # run (signal*pes) times
-    print(f'result={scd}')
     end_time = time.time()
     cpu_time = end_time - start_time
     pe_cycle = cycle // pes
-    print('---{:6.2f} seconds on CPU---'.format(cpu_time))
+    print('---{:.4f} seconds on CPU---'.format(cpu_time))
     print('Real total number of cycles on PE = {}'.format(pe_cycle))
+    for index, alpha in enumerate(scd):
+        # print('alpha[{:d}] = {:f}'.format(index, *alpha))
+        # print(len(alpha))
+        print('alpha[{:d}] = {}'.format(index, [np.round(element, 4) for element in alpha]))
     '''
     for i in range(signals):
         for j in range(pes):
             print('PE%d:' %j, list(scd[i][j].queue))
-            print('PE{:d} output: {}'.format(j, ['%.5f, %.5f' % (ele.real, ele.imag) for ele in list(scd[i][j].queue)]))
+            print('PE[{:d}]: {}'.format(j, ['%.5f, %.5f' % (ele.real, ele.imag) for ele in list(scd[i][j].queue)]))
             print(len(list(scd[i][j].queue)))
     '''
 

@@ -119,6 +119,11 @@ def FFT_vectorized(x):
     return X.ravel()
 
 
+def divide_chunks(l, n):
+    for i in range(0, len(l), n):
+        yield l[i: i + n]
+
+
 class LinearArrayCell:
     def __init__(self, cell_size):
         self.cell_size = cell_size
@@ -270,9 +275,10 @@ def main():
     print('Real number of cycles on PE = {}'.format(pe_cycle))
     for i in range(signals):
         for j in range(pes):
-            print('PE[{:d}] = {}'.format(j, ['%.4f' % output for output in list(scd_fft[i][j].queue)]))
-            # print('PE{:d} output: {}'.format(j, ['%.5f, %.5f' % (element.real, element.imag) for element in list(scd_fft[i][j].queue)]))
-            # print(len(list(scd_fft[i][j].queue)))
+            scd_list = list(scd_fft[i][j].queue)
+            fft_output = list(divide_chunks(scd_list, 16))
+            for fft_block in fft_output:
+                print('PE[{:d}] = {}'.format(j, [round(element, 4) for element in fft_block]))
 
 
 if __name__ == "__main__":
