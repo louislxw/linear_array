@@ -165,7 +165,6 @@ class LinearArrayCell:
         list_1 = list(self.data_to_compute_1.queue)
         list_2 = list(self.data_to_compute_2.queue)
         list_3 = complex_mult(list_1, list_2)
-
         # fft_result = DFT(list_3)
         # fft_result = FFT(list_3)
         fft_result = rFFT(list_3)
@@ -176,9 +175,10 @@ class LinearArrayCell:
         # print(f'Compare rFFT with built-in FFT at PE {iterations}:', np.allclose(rFFT(list_3), fft(list_3)))
         # print(f'Compare FFT with built-in FFT at PE {iterations}:', np.allclose(FFT_vectorized(list_3), fft(list_3)))
         fft_shift_results = fftshift(fft_result)[self.cell_size // 2 - 8: self.cell_size // 2 + 8]  # take middle 16-bit
-        self.cell_output.queue = deque(fft_shift_results)
+        fft_abs = np.abs(fft_shift_results)
+        self.cell_output.queue = deque(fft_abs)
+        """To be continued (Alpha profile)"""
         '''
-        ### To be continued (Alpha profile) ### 
         for j in range(len(fft_shift_results)):
             alpha_partial = np.absolute(fft_shift_results[j])
             alpha_final = np.absolute(self.cell_partial_result)
@@ -189,9 +189,6 @@ class LinearArrayCell:
             self.single_out = self.data_to_compute_1.get()
             self.cell_shift.put(self.single_out)
 
-        # if iterations == total_iter:
-        # self.cell_output.queue = deque(self.cell_partial_result)
-
     def clear_shift(self):  # to clear shift data from cell_shift queue when complete an input signal
         for _ in range(self.cell_size):
             self.cell_shift.get()
@@ -199,6 +196,8 @@ class LinearArrayCell:
 
 
 class LinearArray:
+    """A Linear Array which is comprised of a few Linear Array Cells"""
+
     def __init__(self, array_size, cell_size, fifo_input):
         self.array_size = array_size
         self.cell_size = cell_size
@@ -237,7 +236,7 @@ class LinearArray:
 def main():
     print("Hello World!")
     signals = 1
-    pes = 256  # 256
+    pes = 4  # 256
     registers = 32
     total_iter = signals * pes
     input_queue = [[Queue() for _ in range(pes)] for _ in range(signals)]
@@ -246,8 +245,7 @@ def main():
     shift_cycle = registers
     total_cycle = int(read_cycle + compute_cycle + (shift_cycle + compute_cycle) * (pes - 1))
     total_time = total_cycle * 2 / 1000
-    print('Theoretically, total number of cycles = {:d}, Time on FPGA = {:f} us at 500MHz.'.format(total_cycle,
-                                                                                                   total_time))
+    print('Theoretical number of cycles = {:d}, FPGA time = {:f} us at 500MHz.'.format(total_cycle, total_time))
     # print(f'No. of cycles = {int(total_cycle)}, Execution time = {total_cycle * 2 / 1000} us at 500MHz.')
 
     for signal in range(signals):
@@ -264,18 +262,17 @@ def main():
     # print(list(input_queue[0][-1].queue))
     myArray = LinearArray(pes, registers, input_queue)
     start_time = time.time()
-    res = myArray.run(total_iter)  # run (signal*pes) times
+    scd_fft = myArray.run(total_iter)  # run (signal*pes) times
     end_time = time.time()
     cpu_time = end_time - start_time
     pe_cycle = cycle // pes
     print('---{:6.2f} seconds on CPU---'.format(cpu_time))
-    print('Real total number of cycles on PE = {}'.format(pe_cycle))
-
+    print('Real number of cycles on PE = {}'.format(pe_cycle))
     for i in range(signals):
         for j in range(pes):
-            # print('PE%d:' %j, list(res[i][j].queue))
-            # print('PE{:d} output: {}'.format(j, ['%.5f, %.5f' % (element.real, element.imag) for element in list(res[i][j].queue)]))
-            print(len(list(res[i][j].queue)))
+            print('PE[{:d}] = {}'.format(j, ['%.4f' % output for output in list(scd_fft[i][j].queue)]))
+            # print('PE{:d} output: {}'.format(j, ['%.5f, %.5f' % (element.real, element.imag) for element in list(scd_fft[i][j].queue)]))
+            # print(len(list(scd_fft[i][j].queue)))
 
 
 if __name__ == "__main__":
