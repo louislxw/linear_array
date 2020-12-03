@@ -32,7 +32,36 @@ def FFT(x):
                                X_even + factor[N // 2:] * X_odd])
 
 
+def FFT_vectorized(x):
+    """A vectorized, non-recursive version of the Cooley-Tukey FFT"""
+    N = len(x)
+    if np.log2(N) % 1 > 0:
+        raise ValueError("size of x must be a power of 2")
+
+    # N_min here is equivalent to the stopping condition above,
+    # and should be a power of 2
+    N_min = min(N, 2)
+
+    # Perform an O[N^2] DFT on all length-N_min sub-problems at once
+    n = np.arange(N_min)
+    k = n[:, None]
+    M = np.exp(-2j * np.pi * n * k / N_min)
+    X = np.dot(M, np.array(x).reshape((N_min, -1)))
+
+    # build-up each level of the recursive calculation all at once
+    while X.shape[0] < N:
+        X_even = X[:, :X.shape[1] // 2]
+        X_odd = X[:, X.shape[1] // 2:]
+        factor = np.exp(-1j * np.pi * np.arange(X.shape[0])
+                        / X.shape[0])[:, None]
+        X = np.vstack([X_even + factor * X_odd,
+                       X_even - factor * X_odd])
+
+    return X.ravel()
+
+
 def complex_mult(x, y):
+    """Complex multiplication: (X * conjugate(X))"""
     global cycle
     list_3 = []
     for i in range(len(x)):
@@ -45,6 +74,15 @@ def complex_mult(x, y):
     return list_3
 
 
+def getTwiddle(NFFT):
+    """Generate the twiddle factors"""
+    W = np.r_[[1.0 + 1.0j] * NFFT]
+    for k in range(NFFT):
+        W[k] = np.exp(-2.0j * np.pi * k / NFFT)
+
+    return W
+
+
 def rFFT(x):
     """
     Recursive FFT implementation.
@@ -53,7 +91,6 @@ def rFFT(x):
       -- "A Simple and Efficient FFT Implementation in C++"
           by Vlodymyr Myrnyy
     """
-
     n = len(x)
     if n == 1:
         return x
@@ -80,45 +117,6 @@ def rFFT(x):
     return F
 
 
-def getTwiddle(NFFT):
-    """Generate the twiddle factors"""
-
-    W = np.r_[[1.0 + 1.0j] * NFFT]
-    for k in range(NFFT):
-        W[k] = np.exp(-2.0j * np.pi * k / NFFT)
-
-    return W
-
-
-def FFT_vectorized(x):
-    """A vectorized, non-recursive version of the Cooley-Tukey FFT"""
-    N = len(x)
-
-    if np.log2(N) % 1 > 0:
-        raise ValueError("size of x must be a power of 2")
-
-    # N_min here is equivalent to the stopping condition above,
-    # and should be a power of 2
-    N_min = min(N, 2)
-
-    # Perform an O[N^2] DFT on all length-N_min sub-problems at once
-    n = np.arange(N_min)
-    k = n[:, None]
-    M = np.exp(-2j * np.pi * n * k / N_min)
-    X = np.dot(M, np.array(x).reshape((N_min, -1)))
-
-    # build-up each level of the recursive calculation all at once
-    while X.shape[0] < N:
-        X_even = X[:, :X.shape[1] // 2]
-        X_odd = X[:, X.shape[1] // 2:]
-        factor = np.exp(-1j * np.pi * np.arange(X.shape[0])
-                        / X.shape[0])[:, None]
-        X = np.vstack([X_even + factor * X_odd,
-                       X_even - factor * X_odd])
-
-    return X.ravel()
-
-
 class LinearArrayCell:
     def __init__(self, cell_size):
         self.cell_size = cell_size
@@ -128,6 +126,9 @@ class LinearArrayCell:
         self.single_out = 0
         self.data_to_compute_1 = Queue(maxsize=self.cell_size)
         self.data_to_compute_2 = Queue(maxsize=self.cell_size)
+        self.alpha = []
+        self.alpha_top = []
+        self.alpha_bottom = []
         self.cell_shift = Queue()
         self.cell_partial_result = Queue()
         self.cell_output = Queue()
@@ -141,7 +142,7 @@ class LinearArrayCell:
             self.cell_input = array.input[self.signal_index][self.cell_index]
             self.signal_index += 1
         else:
-            self.cell_input = array.cells[self.cell_index - 1]  # shifting registers
+            self.cell_input = array.cells[self.cell_index - 1]  # shift registers
 
     def cell_read(self):  # load all data needed for a cell
         global cycle
@@ -158,43 +159,39 @@ class LinearArrayCell:
             for _ in range(self.cell_size):
                 self.single_in = self.cell_input.cell_shift.get()
                 self.data_to_compute_1.put(self.single_in)
-                cycle += 1
                 # self.data_to_compute_2.put(self.single_in.real - self.single_in.imag * 1j)
+                cycle += 1
 
-    def compute(self, iterations):
+    def compute(self, last_cell, pre_cell_alpha, iterations, total_iterations):
         list_1 = list(self.data_to_compute_1.queue)
         list_2 = list(self.data_to_compute_2.queue)
-        list_3 = complex_mult(list_1, list_2)
-        # fft_result = DFT(list_3)
-        # fft_result = FFT(list_3)
-        fft_result = rFFT(list_3)
-        # fft_result = FFT_vectorized(list_3)
-        # fft_result = fft(list_3)
-        # print(f'Compare DFT with built-in FFT at PE {iterations}:', np.allclose(DFT(list_3), fft(list_3)))
-        # print(f'Compare FFT with built-in FFT at PE {iterations}:', np.allclose(FFT(list_3), fft(list_3)))
-        # print(f'Compare rFFT with built-in FFT at PE {iterations}:', np.allclose(rFFT(list_3), fft(list_3)))
-        # print(f'Compare FFT with built-in FFT at PE {iterations}:', np.allclose(FFT_vectorized(list_3), fft(list_3)))
-        fft_shift_results = fftshift(fft_result)[self.cell_size // 2 - 8: self.cell_size // 2 + 8]  # take middle 16-bit
-        self.cell_output.queue = deque(fft_shift_results)
-        for _ in range(self.cell_size):
-            self.single_out = self.data_to_compute_1.get()
-            self.cell_shift.put(self.single_out)
+        cm = complex_mult(list_1, list_2)
+        # fft_result = DFT(cm_1)
+        # print(f'Compare DFT with built-in FFT at PE {iterations}:', np.allclose(DFT(cm_0), fft(cm_0)))
+        fft_res = rFFT(cm)
+        # print(f'Compare rFFT with built-in FFT at PE {iterations}:', np.allclose(rFFT(cm_0), fft(cm_0)))
+        fft_shift = fftshift(fft_res)[len(fft_res) // 2 - 8: len(fft_res) // 2 + 8]  # fft_res[8:23]
+        fft_abs = np.abs(fft_shift)
+        if iterations == 0:
+            self.alpha_top = fft_abs[len(fft_abs) // 2: len(fft_abs)]  # fft_abs[8:15]
+        else:
+            if not last_cell:
+                self.alpha_bottom = fft_abs[0: len(fft_abs) // 2]  # fft_abs[0:7]
+                for i in range(len(fft_abs) // 2):
+                    if self.alpha_top[i] < self.alpha_bottom[i]:  # current bottom and pre_iteration top
+                        self.alpha_top[i] = self.alpha_bottom[i]  # top store max values of cell
+                    if self.alpha_top[i] < pre_cell_alpha[i]:  # compare with pre_cell's alpha
+                        self.alpha_top[i] = pre_cell_alpha[i]
+                self.alpha = self.alpha_top
+                self.alpha_top = fft_abs[len(fft_abs) // 2: len(
+                    fft_abs)]  # update top to compare to next iteration's bottom
+            else:
+                for i in range(len(fft_abs) // 2):
+                    if self.alpha_top[i] < pre_cell_alpha[i]:  # compare with pre_cell's alpha
+                        self.alpha_top[i] = pre_cell_alpha[i]
+                self.alpha = self.alpha_top
 
-    def compute_alpha(self, iterations):
-        list_1 = list(self.data_to_compute_1.queue)
-        list_2 = list(self.data_to_compute_2.queue)
-        list_3 = complex_mult(list_1, list_2)
-        fft_result = rFFT(list_3)
-        fft_shift_results = fftshift(fft_result)[self.cell_size // 2 - 8: self.cell_size // 2 + 8]  # take middle 16-bit
-        self.cell_output.queue = deque(fft_shift_results)
-        '''
-        ### To be continued (Alpha profile) ### 
-        for j in range(len(fft_shift_results)):
-            alpha_partial = np.absolute(fft_shift_results[j])
-            alpha_final = np.absolute(self.cell_partial_result)
-            if alpha_partial > alpha_final:
-                self.cell_partial_result = alpha_partial
-        '''
+    def shift(self):
         for _ in range(self.cell_size):
             self.single_out = self.data_to_compute_1.get()
             self.cell_shift.put(self.single_out)
@@ -212,11 +209,12 @@ class LinearArray:
         self.input = fifo_input
         self.iterations = 0
         self.cells = []
-        self.result = [[Queue() for _ in range(self.array_size)] for _ in range(len(self.input))]
+        self.result = []
 
         for _ in range(self.array_size):
             cell = LinearArrayCell(self.cell_size)
             self.cells.append(cell)
+        self.num_cells = len(self.cells)
 
     def connect(self):
         for cell_index, cell in enumerate(self.cells):
@@ -226,38 +224,40 @@ class LinearArray:
         for cell in self.cells:
             cell.cell_read()
 
-    def compute(self):
-        for cell in self.cells:
-            cell.compute(self.iterations)
-            for _ in range(cell.cell_size // 2):
-                self.result[cell.signal_index - 1][cell.cell_index].put(cell.cell_output.get())
+    def compute(self, total_iterations):
+        last_cell = False
+        for i in range(self.num_cells):
+            if i == self.num_cells - 1:
+                last_cell = True
+            if i == 0:
+                self.cells[i].compute(last_cell, [0 for _ in range(8)], self.iterations, total_iterations)
+            else:
+                self.cells[i].compute(last_cell, self.cells[i - 1].alpha, self.iterations, total_iterations)
+        if self.iterations > 0:
+            self.num_cells -= 1
 
-    def compute_alpha(self):
+    def shift(self):
         for cell in self.cells:
-            cell.compute_alpha(self.iterations)
-            for _ in range(cell.cell_size // 2):
-                self.result[cell.signal_index - 1][cell.cell_index].put(cell.cell_output.get())
+            cell.shift()
 
     def run(self, total_iterations):
         for _ in range(total_iterations):
             self.connect()
             self.read()
-            self.compute()
+            self.compute(total_iterations)
+            self.shift()
             self.iterations += 1
-        return self.result
-
-    def run_alpha(self, total_iterations):
-        for _ in range(total_iterations):
-            self.connect()
-            self.read()
-            self.compute_alpha()
-            self.iterations += 1
+        self.result.append(self.cells[0].alpha_top)
+        self.cells.pop(0)
+        for cell in self.cells:
+            self.result.append(cell.alpha)
         return self.result
 
 
 def main():
+    print("Hello World!")
     signals = 1
-    pes = 1  # 256
+    pes = 4  # 256
     registers = 32
     total_iter = signals * pes
     input_queue = [[Queue() for _ in range(pes)] for _ in range(signals)]
@@ -266,8 +266,7 @@ def main():
     shift_cycle = registers
     total_cycle = int(read_cycle + compute_cycle + (shift_cycle + compute_cycle) * (pes - 1))
     total_time = total_cycle * 2 / 1000
-    print('Theoretically, total number of cycles = {:d}, Time on FPGA = {:f} us at 500MHz.'.format(total_cycle,
-                                                                                                   total_time))
+    print('Theoretical number of cycles = {:d}. FPGA time = {:f} us at 500MHz.'.format(total_cycle, total_time))
 
     for signal in range(signals):
         for pe in range(pes):
@@ -281,28 +280,23 @@ def main():
                     input_queue[signal][pe].put(complex_data)
 
     # print(list(input_queue[0][-1].queue))
-
     myArray = LinearArray(pes, registers, input_queue)
     start_time = time.time()
-    scd_fft = myArray.run(total_iter)  # run (signal*pes) times
-    scd_alpha = myArray.run_alpha(total_iter)  # run (signal*pes) times
+    scd = myArray.run(total_iter)  # run (signal*pes) times
+    print(f'result={scd}')
     end_time = time.time()
     cpu_time = end_time - start_time
     pe_cycle = cycle // pes
     print('---{:6.2f} seconds on CPU---'.format(cpu_time))
     print('Real total number of cycles on PE = {}'.format(pe_cycle))
-
     '''
     for i in range(signals):
         for j in range(pes):
-            # print('PE%d:' %j, list(scd_alpha[i][j].queue))
-            # print('PE{:d} output: {}'.format(j, ['%.5f, %.5f' % (element.real,
-            # element.imag) for element in list(scd_alpha[i][j].queue)]))
-            print(len(list(scd_alpha[i][j].queue)))
+            print('PE%d:' %j, list(scd[i][j].queue))
+            print('PE{:d} output: {}'.format(j, ['%.5f, %.5f' % (ele.real, ele.imag) for ele in list(scd[i][j].queue)]))
+            print(len(list(scd[i][j].queue)))
     '''
 
 
 if __name__ == "__main__":
     main()
-
-
