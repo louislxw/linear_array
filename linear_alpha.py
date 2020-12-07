@@ -1,6 +1,5 @@
 import time
 import numpy as np
-from queue import deque
 from queue import Queue
 from scipy.fftpack import fft, fftshift
 
@@ -126,7 +125,7 @@ class LinearArrayCell:
         self.single_out = 0
         self.data_to_compute_1 = Queue(maxsize=self.cell_size)
         self.data_to_compute_2 = Queue(maxsize=self.cell_size)
-        self.alpha = []
+        self.alpha = [0] * 8
         self.alpha_top = []
         self.alpha_bottom = []
         self.cell_shift = Queue()
@@ -162,36 +161,40 @@ class LinearArrayCell:
                 # self.data_to_compute_2.put(self.single_in.real - self.single_in.imag * 1j)
                 cycle += 1
 
-    def compute(self, last_cell, prev_alpha, iterations, total_iterations):
+    def compute(self, last_cell, prev_alpha, iterations):
+        global cycle
         list_1 = list(self.data_to_compute_1.queue)
         list_2 = list(self.data_to_compute_2.queue)
         cm = complex_mult(list_1, list_2)
         fft_res = rFFT(cm)
         # print(f'Compare rFFT with built-in FFT at PE {iterations}:', np.allclose(rFFT(cm), fft(cm)))
         fft_shift = fftshift(fft_res)[len(fft_res) // 2 - 8: len(fft_res) // 2 + 8]  # fft_res[8:23]
-        global cycle
         fft_abs = np.abs(fft_shift)
         cycle += 16
         if iterations == 0:
             self.alpha_top = fft_abs[len(fft_abs) // 2: len(fft_abs)]  # previous top: fft_abs[8:15]
-        else:
+        else:  # iteration 1 to N-1
             if not last_cell:
-                self.alpha = self.alpha_top  # initialize alpha with previous top: fft_abs[8:15]
+                # self.alpha = self.alpha_top  # initialize alpha with previous top: fft_abs[8:15]
                 self.alpha_bottom = fft_abs[0: len(fft_abs) // 2]  # current bottom: fft_abs[0:7]
                 for i in range(len(fft_abs) // 2):
-                    if self.alpha[i] < self.alpha_bottom[i]:  # alpha = max(previous top, current bottom)
+                    # alpha = max(top of (k-1) iteration, bottom of k iteration, alpha of previous PE) #
+                    if self.alpha_top[i] < self.alpha_bottom[i]:
                         self.alpha[i] = self.alpha_bottom[i]  # update alpha
-                    if self.alpha[i] < prev_alpha[i]:  # alpha Vs. previous alpha
+                    else:
+                        self.alpha[i] = self.alpha_top[i]  # update alpha
+                    if self.alpha[i] < prev_alpha[i]:
                         self.alpha[i] = prev_alpha[i]  # update alpha
                     cycle += 2
-                # self.alpha = self.alpha_top
                 self.alpha_top = fft_abs[len(fft_abs) // 2: len(fft_abs)]  # update alpha_top to current iteration
-            else:
+            else:  # last PE in each iteration
                 for i in range(len(fft_abs) // 2):
-                    if self.alpha_top[i] < prev_alpha[i]:  # top Vs. current bottom
-                        self.alpha_top[i] = prev_alpha[i]
+                    if self.alpha_top[i] < prev_alpha[i]:  # top of previous iteration Vs. alpha of previous PE
+                        self.alpha[i] = prev_alpha[i]
+                    else:
+                        self.alpha[i] = self.alpha_top[i]
                     cycle += 1
-                self.alpha = self.alpha_top  # final output: alpha
+                # self.alpha = self.alpha_top  # final output: alpha
 
     def shift(self):
         global cycle
@@ -228,15 +231,15 @@ class LinearArray:
         for cell in self.cells:
             cell.cell_read()
 
-    def compute(self, total_iterations):
+    def compute(self):
         last_cell = False
         for i in range(self.num_cells):
             if i == self.num_cells - 1:
                 last_cell = True
             if i == 0:  # iteration 0: prev_alpha = [0, 0, 0, 0, 0, 0, 0, 0]
-                self.cells[i].compute(last_cell, [0 for _ in range(8)], self.iterations, total_iterations)
+                self.cells[i].compute(last_cell, [0 for _ in range(8)], self.iterations)
             else:  # iteration i: prev_alpha = cells[i-1].alpha
-                self.cells[i].compute(last_cell, self.cells[i - 1].alpha, self.iterations, total_iterations)
+                self.cells[i].compute(last_cell, self.cells[i - 1].alpha, self.iterations)
         if self.iterations > 0:
             self.num_cells -= 1
 
@@ -248,10 +251,10 @@ class LinearArray:
         for _ in range(total_iterations):
             self.connect()
             self.read()
-            self.compute(total_iterations)
+            self.compute()
             self.shift()
             self.iterations += 1
-        self.result.append(self.cells[0].alpha_top)
+        self.result.append(self.cells[0].alpha_top)  # output alpha_top of PE[0]
         self.cells.pop(0)
         for cell in self.cells:
             self.result.append(cell.alpha)
@@ -276,7 +279,7 @@ def main():
         for pe in range(pes):
             if signal == 0:
                 for index in range(pe * registers, (pe + 1) * registers):
-                    complex_data = index / 128 + (index + 1) / 128 * 1j
+                    complex_data = index / 128  # + (index + 1) / 128 * 1j
                     input_queue[signal][pe].put(complex_data)
             if signal > 0:
                 for index in reversed(range(pe * registers, (pe + 1) * registers)):
