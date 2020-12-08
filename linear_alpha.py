@@ -58,16 +58,17 @@ def FFT_vectorized(x):
     return X.ravel()
 
 
-def complex_mult(x, y):
+def complex_mult(cell_index, x, y):
     """Complex multiplication: (X * conjugate(X))"""
-    global cycle
     list_3 = []
     for i in range(len(x)):
         real_part = x[i].real * y[i].real - x[i].imag * y[i].imag
         image_part = x[i].imag * y[i].real + x[i].real * y[i].imag
         complex_result = real_part + image_part * 1j
         list_3.append(complex_result)
-        cycle += 1
+        global cycle
+        if cell_index == 0:  # Add for PE[0]
+            cycle += 1
 
     return list_3
 
@@ -81,7 +82,7 @@ def getTwiddle(NFFT):
     return W
 
 
-def rFFT(x):
+def rFFT(cell_index, x):
     """
     Recursive FFT implementation.
     References
@@ -99,14 +100,15 @@ def rFFT(x):
     for k in range(m):
         X[k] = x[2 * k]
         Y[k] = x[2 * k + 1]
-    X = rFFT(X)
-    Y = rFFT(Y)
+    X = rFFT(cell_index, X)
+    Y = rFFT(cell_index, Y)
     F = np.ones(n, float) * 1j
     for k in range(n):
         i = (k % m)
         F[k] = X[i] + w[k] * Y[i]
         global cycle
-        cycle += 1
+        if cell_index == 0:  # Add for PE[0]
+            cycle += 1
 
     return F
 
@@ -139,7 +141,7 @@ class LinearArrayCell:
             self.cell_input = array.cells[self.cell_index - 1]  # shift registers
 
     def cell_read(self):  # load all data needed for a cell
-        global cycle
+        # global cycle
         if type(self.cell_input) is Queue:  # from input FIFO
             for _ in range(self.cell_size):
                 if self.cell_input.empty():
@@ -148,24 +150,25 @@ class LinearArrayCell:
                     self.single_in = self.cell_input.get()
                 self.data_to_compute_1.put(self.single_in)
                 self.data_to_compute_2.put(self.single_in.real - self.single_in.imag * 1j)  # conjugate
-                cycle += 1
+                # cycle += 1
         else:  # from shift registers (only for data, not for conjugate(data))
             for _ in range(self.cell_size):
                 self.single_in = self.cell_input.cell_shift.get()
                 self.data_to_compute_1.put(self.single_in)
                 # self.data_to_compute_2.put(self.single_in.real - self.single_in.imag * 1j)
-                cycle += 1
+                # cycle += 1
 
-    def compute(self, last_cell, prev_alpha, iterations):
+    def compute(self, cell_index, last_cell, prev_alpha, iterations):
         global cycle
         list_1 = list(self.data_to_compute_1.queue)
         list_2 = list(self.data_to_compute_2.queue)
-        cm = complex_mult(list_1, list_2)
-        fft_res = rFFT(cm)
+        cm = complex_mult(cell_index, list_1, list_2)
+        fft_res = rFFT(cell_index, cm)
         # print(f'Compare rFFT with built-in FFT at PE {iterations}:', np.allclose(rFFT(cm), fft(cm)))
         fft_shift = fftshift(fft_res)[len(fft_res) // 2 - 8: len(fft_res) // 2 + 8]  # fft_res[8:23]
         fft_abs = np.abs(fft_shift)
-        cycle += 16
+        if cell_index == 0:  # Add for PE[0]
+            cycle += 16
         if iterations == 0:
             self.alpha_top = fft_abs[len(fft_abs) // 2: len(fft_abs)]  # previous top: fft_abs[8:15]
         else:  # iteration 1 to N-1
@@ -180,7 +183,8 @@ class LinearArrayCell:
                         self.alpha[i] = self.alpha_top[i]  # update alpha
                     if self.alpha[i] < prev_alpha[i]:
                         self.alpha[i] = prev_alpha[i]  # update alpha
-                    cycle += 2
+                    if cell_index == 0:  # Add for PE[0]
+                        cycle += 2
                 self.alpha_top = fft_abs[len(fft_abs) // 2: len(fft_abs)]  # update alpha_top to current iteration
             else:  # last PE in each iteration
                 for i in range(len(fft_abs) // 2):
@@ -188,15 +192,16 @@ class LinearArrayCell:
                         self.alpha[i] = prev_alpha[i]
                     else:
                         self.alpha[i] = self.alpha_top[i]
-                    cycle += 1
+                    if cell_index == 0:  # Add for PE[0]
+                        cycle += 1
                 # self.alpha = self.alpha_top  # final output: alpha
 
     def shift(self):
-        global cycle
+        # global cycle
         for _ in range(self.cell_size):
             self.single_out = self.data_to_compute_1.get()
             self.cell_shift.put(self.single_out)
-            cycle += 1
+            # cycle += 1
 
     def clear_shift(self):  # to clear shift data from cell_shift queue when complete an input signal
         for _ in range(self.cell_size):
@@ -232,9 +237,9 @@ class LinearArray:
             if i == self.num_cells - 1:
                 last_cell = True
             if i == 0:  # iteration 0: prev_alpha = [0, 0, 0, 0, 0, 0, 0, 0]
-                self.cells[i].compute(last_cell, [0 for _ in range(8)], self.iterations)
+                self.cells[i].compute(i, last_cell, [0 for _ in range(8)], self.iterations)
             else:  # iteration i: prev_alpha = cells[i-1].alpha
-                self.cells[i].compute(last_cell, self.cells[i - 1].alpha, self.iterations)
+                self.cells[i].compute(i, last_cell, self.cells[i - 1].alpha, self.iterations)
         if self.iterations > 0:
             self.num_cells -= 1
 
@@ -246,6 +251,8 @@ class LinearArray:
         for _ in range(total_iterations):
             self.connect()
             self.read()
+            global cycle
+            cycle += 32
             self.compute()
             self.shift()
             self.iterations += 1
@@ -265,31 +272,27 @@ def sliding_window(x, w, s):
 def main():
     # print("Hello World!")
     signals = 1
-    pes = 256  # 256, 16
+    pes = 16  # 256, 16
     registers = 32  # 32
     total_iter = signals * pes
     input_queue = [[Queue() for _ in range(pes)] for _ in range(signals)]
-    read_cycle = registers * pes
-    compute_cycle = registers + registers * np.log2(registers)
+    input_cycle = registers  # * pes
+    compute_cycle = registers + registers * np.log2(registers) + registers / 2 + registers / 2
     shift_cycle = registers
-    total_cycle = int(read_cycle + compute_cycle + (shift_cycle + compute_cycle) * (pes - 1))
+    output_cycle = registers  # * pes
+    total_cycle = int(input_cycle + compute_cycle + (shift_cycle + compute_cycle) * (pes - 1)) + output_cycle
     total_time = total_cycle * 2 / 1000
     print('Theoretical number of cycles = {:d}. FPGA time = {:f} us at 500MHz.'.format(total_cycle, total_time))
 
     """The following part is to generate the inputs for PE array which should match with MATLAB simulation"""
     # input channelization
-    N = 2048  # 2048, 128
-    Np = 256  # 256, 16
-    L = 64  # 64, 4
-    if N is None:
-        Pe = int(np.floor(int(np.log(xs.shape[0]) / np.log(2))))
-        P = 2 ** Pe
-        N = L * P
-    else:
-        P = N // L
+    N = 128  # 2048, 128
+    Np = 16  # 256, 16
+    L = 4  # 64, 4
+    P = N // L
     NN = (P-1)*L + Np
     a = np.array([0, 0.1, 0.2, 0.3])
-    x = np.tile(a, 560)  # 32
+    x = np.tile(a, 32)  # 560, 32
     xs = np.zeros(NN)
     for i in range(P * L):
         xs[i] = x[i]
@@ -339,7 +342,8 @@ def main():
     scd = myArray.run(total_iter)  # run (signal*pes) times
     end_time = time.time()
     cpu_time = end_time - start_time
-    pe_cycle = cycle // pes
+    # pe_cycle = cycle // pes
+    pe_cycle = cycle
     print('----{:.4f} seconds on CPU----'.format(cpu_time))
     print('Real total number of cycles on PE = {}'.format(pe_cycle))
     # print('----alpha profile of SCD matrix----')
