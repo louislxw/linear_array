@@ -2,6 +2,8 @@ import time
 import numpy as np
 from queue import Queue
 from scipy.fftpack import fft, fftshift
+from numpy.lib.stride_tricks import as_strided
+from scipy.integrate._ivp.radau import P
 
 global cycle
 cycle = 0
@@ -36,17 +38,14 @@ def FFT_vectorized(x):
     N = len(x)
     if np.log2(N) % 1 > 0:
         raise ValueError("size of x must be a power of 2")
-
     # N_min here is equivalent to the stopping condition above,
     # and should be a power of 2
     N_min = min(N, 2)
-
     # Perform an O[N^2] DFT on all length-N_min sub-problems at once
     n = np.arange(N_min)
     k = n[:, None]
     M = np.exp(-2j * np.pi * n * k / N_min)
     X = np.dot(M, np.array(x).reshape((N_min, -1)))
-
     # build-up each level of the recursive calculation all at once
     while X.shape[0] < N:
         X_even = X[:, :X.shape[1] // 2]
@@ -93,20 +92,16 @@ def rFFT(x):
     n = len(x)
     if n == 1:
         return x
-
     w = getTwiddle(n)
     m = n // 2
     X = np.ones(m, float) * 1j
     Y = np.ones(m, float) * 1j
-
     for k in range(m):
         X[k] = x[2 * k]
         Y[k] = x[2 * k + 1]
-
     X = rFFT(X)
     Y = rFFT(Y)
     F = np.ones(n, float) * 1j
-
     for k in range(n):
         i = (k % m)
         F[k] = X[i] + w[k] * Y[i]
@@ -261,11 +256,17 @@ class LinearArray:
         return self.result
 
 
+def sliding_window(x, w, s):
+    shape = (((x.shape[0] - w) // s + 1), w)
+    strides = (x.strides[0] * s, x.strides[0])
+    return as_strided(x, shape, strides)
+
+
 def main():
     # print("Hello World!")
     signals = 1
-    pes = 4  # 256
-    registers = 32
+    pes = 256  # 256, 16
+    registers = 32  # 32
     total_iter = signals * pes
     input_queue = [[Queue() for _ in range(pes)] for _ in range(signals)]
     read_cycle = registers * pes
@@ -275,17 +276,63 @@ def main():
     total_time = total_cycle * 2 / 1000
     print('Theoretical number of cycles = {:d}. FPGA time = {:f} us at 500MHz.'.format(total_cycle, total_time))
 
+    """The following part is to generate the inputs for PE array which should match with MATLAB simulation"""
+    # input channelization
+    N = 2048  # 2048, 128
+    Np = 256  # 256, 16
+    L = 64  # 64, 4
+    if N is None:
+        Pe = int(np.floor(int(np.log(xs.shape[0]) / np.log(2))))
+        P = 2 ** Pe
+        N = L * P
+    else:
+        P = N // L
+    NN = (P-1)*L + Np
+    a = np.array([0, 0.1, 0.2, 0.3])
+    x = np.tile(a, 560)  # 32
+    xs = np.zeros(NN)
+    for i in range(P * L):
+        xs[i] = x[i]
+    # xs = sliding_window(x, Np, L)  # x, Np, L
+    b = np.zeros(1)
+    xs2 = np.tile(b, (pes, registers))
+    for k in range(P):
+        xs2[:, k] = xs[k*L:k*L+Np]
+    # windowing
+    w = np.hamming(Np)
+    ww = np.tile(w, (P, 1))
+    xw = xs2 * ww.transpose()
+    xw = xw.transpose()
+    # first FFT
+    XFFT1 = fft(xw, axis=1)
+    # FFT shift
+    XFFT1_shift = fftshift(XFFT1, axes=1)
+    # calculating complex demodulates
+    f = np.arange(Np) / float(Np) - .5
+    t = np.arange(P) * L
+    f = np.tile(f, (P, 1))
+    t = np.tile(t.reshape(P, 1), (1, Np))
+    # Down conversion
+    XD = XFFT1_shift * np.exp(-1j * 2 * np.pi * f * t)
+    XD = XD.transpose()  # size: Np * P
+    # Use the down conversion results as the inputs of PE arrays
+    for signal in range(signals):
+        for pe in range(pes):
+            for register in range(registers):
+                pe_input = XD[pe][register]
+                input_queue[signal][pe].put(pe_input)
+    '''    
     for signal in range(signals):
         for pe in range(pes):
             if signal == 0:
                 for index in range(pe * registers, (pe + 1) * registers):
-                    complex_data = index / 128  # + (index + 1) / 128 * 1j
+                    complex_data = index / 256  # + (index + 1) / 256 * 1j
                     input_queue[signal][pe].put(complex_data)
             if signal > 0:
                 for index in reversed(range(pe * registers, (pe + 1) * registers)):
-                    complex_data = index / 128 + (index + 1) / 128 * 1j
+                    complex_data = index / 256 + (index + 1) / 256 * 1j
                     input_queue[signal][pe].put(complex_data)
-
+    '''
     # print(list(input_queue[0][-1].queue))
     myArray = LinearArray(pes, registers, input_queue)
     start_time = time.time()
@@ -300,12 +347,6 @@ def main():
         # print('alpha[{:d}] = {:f}'.format(index, *alpha))
         # print(len(alpha))
         print('alpha[{:d}] = {}'.format(index, [np.round(element, 4) for element in alpha]))
-    '''
-    for i in range(signals):
-        for j in range(pes):
-            print('PE[{:d}]: {}'.format(j, ['%.5f, %.5f' % (ele.real, ele.imag) for ele in list(scd[i][j].queue)]))
-            print(len(list(scd[i][j].queue)))
-    '''
 
 
 if __name__ == "__main__":
