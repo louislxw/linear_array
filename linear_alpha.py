@@ -236,9 +236,9 @@ class LinearArray:
         for i in range(self.num_cells):
             if i == self.num_cells - 1:
                 last_cell = True
-            if i == 0:  # iteration 0: prev_alpha = [0, 0, 0, 0, 0, 0, 0, 0]
+            if i == 0:  # cell 0: prev_alpha = [0, 0, 0, 0, 0, 0, 0, 0]
                 self.cells[i].compute(i, last_cell, [0 for _ in range(8)], self.iterations)
-            else:  # iteration i: prev_alpha = cells[i-1].alpha
+            else:  # cell i: prev_alpha = cells[i-1].alpha
                 self.cells[i].compute(i, last_cell, self.cells[i - 1].alpha, self.iterations)
         if self.iterations > 0:
             self.num_cells -= 1
