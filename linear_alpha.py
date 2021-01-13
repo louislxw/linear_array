@@ -290,17 +290,20 @@ def main():
     Np = 16  # 256, 16
     L = 4  # 64, 4
     P = N // L
-    NN = (P-1)*L + Np
-    a = np.array([0, 0.1, 0.2, 0.3])
-    x = np.tile(a, 32)  # 560, 32
-    xs = np.zeros(NN)
+    NN = (P - 1) * L + Np
+    # Random data
+    # a = np.array([0, 0.1, 0.2, 0.3])
+    # x = np.tile(a, 32)  # 560, 32
+    # Load data from RFML dataset
+    x = np.load('iq.npy')
+    xs = np.zeros(NN, dtype=complex)  # xs = np.zeros(NN)
     for i in range(P * L):
         xs[i] = x[i]
     # xs = sliding_window(x, Np, L)  # x, Np, L
-    b = np.zeros(1)
+    b = np.zeros(1, dtype=complex)  # b = np.zeros(1)
     xs2 = np.tile(b, (pes, registers))
     for k in range(P):
-        xs2[:, k] = xs[k*L:k*L+Np]
+        xs2[:, k] = xs[k * L:k * L + Np]
     # windowing
     w = np.hamming(Np)
     ww = np.tile(w, (P, 1))
