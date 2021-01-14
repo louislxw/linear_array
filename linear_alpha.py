@@ -269,10 +269,15 @@ def sliding_window(x, w, s):
     return as_strided(x, shape, strides)
 
 
+def normalize_complex_arr(a):
+    a_oo = a - a.real.min() - 1j * a.imag.min()  # origin offsetted
+    return a_oo / np.abs(a_oo).max()
+
+
 def main():
     # print("Hello World!")
     signals = 1
-    pes = 16  # 256, 16
+    pes = 256  # 256, 16
     registers = 32  # 32
     total_iter = signals * pes
     input_queue = [[Queue() for _ in range(pes)] for _ in range(signals)]
@@ -286,9 +291,9 @@ def main():
 
     """The following part is to generate the inputs for PE array which should match with MATLAB simulation"""
     # input channelization
-    N = 128  # 2048, 128
-    Np = 16  # 256, 16
-    L = 4  # 64, 4
+    N = 2048  # 2048, 128
+    Np = 256  # 256, 16
+    L = 64  # 64, 4
     P = N // L
     NN = (P - 1) * L + Np
     # Random data
@@ -311,8 +316,11 @@ def main():
     xw = xw.transpose()
     # first FFT
     XFFT1 = fft(xw, axis=1)
+    # normalization
+    XFFT1_norm = normalize_complex_arr(XFFT1)
     # FFT shift
-    XFFT1_shift = fftshift(XFFT1, axes=1)
+    # XFFT1_shift = fftshift(XFFT1, axes=1)
+    XFFT1_shift = fftshift(XFFT1_norm, axes=1)
     # calculating complex demodulates
     f = np.arange(Np) / float(Np) - .5
     t = np.arange(P) * L
