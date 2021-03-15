@@ -1,4 +1,5 @@
 import time
+import struct
 import numpy as np
 from queue import Queue
 from scipy.fftpack import fft, fftshift
@@ -274,11 +275,15 @@ def normalize_complex_arr(a):
     return a_oo / np.abs(a_oo).max()
 
 
+def float_to_hex(f):
+    return hex(struct.unpack('<I', struct.pack('<f', f))[0])
+
+
 def main():
     # print("Hello World!")
     signals = 1
-    pes = 256  # 256, 16
-    registers = 32  # 32
+    pes = 8  # 256, 16, 8
+    registers = 32  # 32, 32, 32
     total_iter = signals * pes
     input_queue = [[Queue() for _ in range(pes)] for _ in range(signals)]
     input_cycle = registers  # * pes
@@ -291,16 +296,16 @@ def main():
 
     """The following part is to generate the inputs for PE array which should match with MATLAB simulation"""
     # input channelization
-    N = 2048  # 2048, 128
-    Np = 256  # 256, 16
-    L = 64  # 64, 4
+    N = 64  # 2048, 128, 64
+    Np = 8  # 256, 16, 8
+    L = 2  # 64, 4, 2
     P = N // L
     NN = (P - 1) * L + Np
     # Random data
     # a = np.array([0, 0.1, 0.2, 0.3])
     # x = np.tile(a, 32)  # 560, 32
     # Load data from RFML dataset
-    x = np.load('iq.npy')
+    x = np.load('data/iq.npy')
     xs = np.zeros(NN, dtype=complex)  # xs = np.zeros(NN)
     for i in range(P * L):
         xs[i] = x[i]
@@ -329,6 +334,13 @@ def main():
     # Down conversion
     XD = XFFT1_shift * np.exp(-1j * 2 * np.pi * f * t)
     XD = XD.transpose()  # size: Np * P
+    np.savetxt("data/array_input.txt", XD)  # save to text
+    XD_1d = XD.flatten()
+    XD_real_hex = np.array([float_to_hex(x.real) for x in XD_1d])  # 16-bit hex for real
+    XD_imag_hex = np.array([float_to_hex(x.imag) for x in XD_1d])  # 16-bit hex for image
+    XD_real = np.array([x & 0xFFFF0000] for x in XD_real_hex)
+    XD_imag = np.array([x & 0x0000FFFF] for x in XD_imag_hex)
+    # np.savetxt("data/array_input_hex.txt", XD_hex)  # save to text for FPGA process
     # Use the down conversion results as the inputs of PE arrays
     for signal in range(signals):
         for pe in range(pes):
@@ -362,6 +374,7 @@ def main():
         # print('alpha[{:d}] = {:f}'.format(index, *alpha))
         # print(len(alpha))
         print('alpha[{:d}] = {}'.format(index, [np.round(element, 4) for element in alpha]))
+    np.savetxt("data/scd_result.txt", scd)  # save to text
 
 
 if __name__ == "__main__":
