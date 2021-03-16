@@ -334,13 +334,18 @@ def main():
     # Down conversion
     XD = XFFT1_shift * np.exp(-1j * 2 * np.pi * f * t)
     XD = XD.transpose()  # size: Np * P
-    np.savetxt("data/array_input.txt", XD)  # save to text
+    """The following code is added to generate the hex representation of PE array input"""
+    np.savetxt("data/array_input.txt", XD)  # save to text (floating-point complex values)
     XD_1d = XD.flatten()
-    XD_real_hex = np.array([float_to_hex(x.real) for x in XD_1d])  # 16-bit hex for real
-    XD_imag_hex = np.array([float_to_hex(x.imag) for x in XD_1d])  # 16-bit hex for image
-    XD_real = np.array([x & 0xFFFF0000] for x in XD_real_hex)
-    XD_imag = np.array([x & 0x0000FFFF] for x in XD_imag_hex)
-    # np.savetxt("data/array_input_hex.txt", XD_hex)  # save to text for FPGA process
+    XD_real_hex = np.array([float_to_hex(x.real) for x in XD_1d])  # 32-bit hex for real
+    XD_imag_hex = np.array([float_to_hex(x.imag) for x in XD_1d])  # 32-bit hex for image
+    XD_real_int = np.array([((int(x, 0) >> 16) & 0xFFFF) for x in XD_real_hex])
+    XD_imag_int = np.array([((int(x, 0) >> 16) & 0xFFFF) for x in XD_imag_hex])
+    XD_real = np.array([hex(x) for x in XD_real_int])  # MSB 16-bit hex for real
+    XD_imag = np.array([hex(x) for x in XD_imag_int])  # MSB 16-bit hex for image
+    XD_int = np.array([(x << 16) + y for x, y in zip(XD_real_int, XD_imag_int)])
+    XD_hex = np.array([hex(x) for x in XD_int])
+    np.savetxt("data/array_input_hex.txt", XD_hex, fmt="%s")  # save to text for FPGA process
     # Use the down conversion results as the inputs of PE arrays
     for signal in range(signals):
         for pe in range(pes):
