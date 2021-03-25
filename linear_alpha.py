@@ -291,9 +291,9 @@ def to_fixed(f, e):
     return b
 
 
-def to_hex(val, nbits):
+def to_hex(val):
     """Covert signed int to hex in  two's complement"""
-    return hex((val + (1 << nbits)) % (1 << nbits))
+    return "%s" % ("0000%x" % (val & 0xffffffff))[-4:]
 
 
 def main():
@@ -350,20 +350,34 @@ def main():
     t = np.tile(t.reshape(P, 1), (1, Np))
     # Down conversion
     XD = XFFT1_shift * np.exp(-1j * 2 * np.pi * f * t)
-    XD = XD.transpose()  # size: Np * P
+    XD = XD.transpose()  # size: Np * P = 32 * 8
     """The following code is added to generate the hex representation of PE array input"""
     np.savetxt("data/array_input.txt", XD)  # save to text (floating-point complex values)
     XD_1d = XD.flatten()
     XD_real_int = np.array([(to_fixed(x.real, 15)) for x in XD_1d])  # 16-bit signed int for real
     XD_imag_int = np.array([(to_fixed(x.imag, 15)) for x in XD_1d])  # 16-bit signed int for image
-    XD_real_hex = np.array([to_hex(x, 16) for x in XD_real_int])  # MSB 16-bit hex for real
-    XD_imag_hex = np.array([to_hex(x, 16) for x in XD_imag_int])  # MSB 16-bit hex for image
+    XD_imag_int_neg = np.array([-x for x in XD_imag_int])
+    XD_real_hex = np.array(([to_hex(x) for x in XD_real_int]))  # MSB 16-bit hex for real
+    XD_imag_hex = np.array([to_hex(x) for x in XD_imag_int])  # MSB 16-bit hex for image
+    XD_imag_hex_conj = np.array([to_hex(x) for x in XD_imag_int_neg])
+    XD_hex = np.array(list(map(str.__add__, XD_real_hex, XD_imag_hex)))  # combine
+    XD_hex = np.array(['0x' + s for s in XD_hex])  # add '0x'
+    XD_hex_conj = np.array(list(map(str.__add__, XD_real_hex, XD_imag_hex_conj)))
+    XD_hex_conj = np.array(['0x' + s for s in XD_hex_conj])
+    '''
     XD_int = np.array([(x << 16) + y for x, y in zip(XD_real_int, XD_imag_int)])
     XD_int_conj = np.array([(x << 16) - y for x, y in zip(XD_real_int, XD_imag_int)])
     XD_hex = np.array([to_hex(x, 32) for x in XD_int])
     XD_hex_conj = np.array([to_hex(x, 32) for x in XD_int_conj])
-    np.savetxt("data/array_x_hex.txt", XD_hex, fmt="%s")  # save to text for FPGA process
-    np.savetxt("data/array_y_hex.txt", XD_hex_conj, fmt="%s")  # save to text for FPGA process
+    '''
+    concat_no = 32
+    set_no = len(XD_hex) // concat_no
+    XD_hex_xy = []
+    for set in range(set_no):
+        XD_hex_xy[set * concat_no * 2:(set + 1) * concat_no * 2] = np.concatenate(
+            (XD_hex[set * concat_no:(set + 1) * concat_no], XD_hex_conj[set * concat_no:(set + 1) * concat_no]))
+    np.savetxt("data/array_input_hex.txt", XD_hex_xy, fmt="%s")  # save to text for FPGA process
+    # np.savetxt("data/array_y_hex.txt", XD_hex_conj, fmt="%s")  # save to text for FPGA process
     # Use the down conversion results as the inputs of PE arrays
     for signal in range(signals):
         for pe in range(pes):
