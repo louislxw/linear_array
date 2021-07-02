@@ -271,8 +271,9 @@ def sliding_window(x, w, s):
 
 
 def normalize_complex_arr(a):
-    a_oo = a - a.real.min() - 1j * a.imag.min()  # origin offsetted
-    return a_oo / np.abs(a_oo).max()
+    # a_oo = a - a.real.min() - 1j * a.imag.min()  # origin offsetted
+    # return a_oo / np.abs(a_oo).max()
+    return a / np.abs(a).max()
 
 
 def to_fixed(f, e):
@@ -322,7 +323,7 @@ def main():
     # a = np.array([0, 0.1, 0.2, 0.3])
     # x = np.tile(a, 32)  # 560, 32
     # Load data from RFML dataset
-    x = np.load('data/iq.npy')
+    x = np.load('data/part18.npy')
     xs = np.zeros(NN, dtype=complex)  # xs = np.zeros(NN)
     for i in range(P * L):
         xs[i] = x[i]
@@ -415,7 +416,7 @@ def main():
         scd_alpha += list(alpha)[::-1]
         # scd_alpha.extend(alpha.tolist().reverse())
     np.savetxt("data/scd_result.txt", scd)  # save to text
-    np.save("data/alpha.npy", scd_alpha)  # save to numpy file
+    np.save("data/part18_alpha.npy", scd_alpha)  # save to numpy file
 
 
 if __name__ == "__main__":
